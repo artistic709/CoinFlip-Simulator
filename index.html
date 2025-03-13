@@ -1,0 +1,428 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Coin Flip Simulation: HH vs HT</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            text-align: center;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: auto;
+        }
+
+        #statsDisplay {
+            margin-top: 20px;
+        }
+
+        table,
+        th,
+        td {
+            border: 1px solid #333;
+            border-collapse: collapse;
+            padding: 8px;
+            margin: auto;
+        }
+
+        button {
+            margin: 5px;
+            padding: 10px 15px;
+            font-size: 16px;
+        }
+
+        /* Tab styles */
+        .tabs {
+            margin-top: 20px;
+            display: flex;
+            justify-content: center;
+        }
+
+        .tab-button {
+            padding: 10px 20px;
+            margin: 0 5px;
+            cursor: pointer;
+            background-color: #f0f0f0;
+            border: 1px solid #ccc;
+        }
+
+        .tab-button.active {
+            background-color: #ddd;
+            font-weight: bold;
+        }
+
+        .chart-container>div {
+            margin-top: 20px;
+        }
+    </style>
+    <!-- Include Chart.js from CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body>
+    <div class="container">
+        <h1>Coin Flip Simulation: HH vs HT</h1>
+        <button id="simulateButton">Simulate Game</button>
+        <button id="simulateBatchButton">Simulate 100 Games</button>
+
+        <!-- Canvas for coin flip sequence visualization with overlay bars -->
+        <canvas id="sequenceCanvas" width="600" height="100" style="border:1px solid #ccc; margin-top:20px;"></canvas>
+
+        <!-- Current Game Scores text, placed just below the sequence -->
+        <div id="currentScoreDisplay" style="margin-top:10px; font-size:18px;"></div>
+
+        <!-- Tabs for charts -->
+        <div class="tabs">
+            <button class="tab-button active" data-target="currentChartContainer">Current Game</button>
+            <button class="tab-button" data-target="differenceChartContainer">Score Difference Frequency</button>
+            <button class="tab-button" data-target="scoreChartContainer">Score Frequency</button>
+        </div>
+
+        <div class="chart-container">
+            <div id="currentChartContainer">
+                <canvas id="currentChart" width="400" height="200"></canvas>
+            </div>
+            <div id="differenceChartContainer" style="display:none;">
+                <canvas id="differenceChart" width="400" height="200"></canvas>
+            </div>
+            <div id="scoreChartContainer" style="display:none;">
+                <canvas id="scoreChart" width="400" height="200"></canvas>
+            </div>
+        </div>
+
+        <div id="statsDisplay"></div>
+    </div>
+
+    <script>
+        // Global variables for historical statistics
+        let totalGames = 0;
+        let aliceScores = [];
+        let bobScores = [];
+        let aliceWins = 0;
+        let bobWins = 0;
+        let ties = 0;
+
+        // --- Current Game Chart (two separate datasets for Alice & Bob) ---
+        const ctxCurrent = document.getElementById('currentChart').getContext('2d');
+        let chartCurrent = new Chart(ctxCurrent, {
+            type: 'bar',
+            data: {
+                labels: ['Current Game'], // single label for side-by-side bars
+                datasets: [
+                    {
+                        label: 'Alice (HH)',
+                        data: [0],  // we will update index 0
+                        backgroundColor: 'rgba(75, 192, 192, 0.6)',
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        borderWidth: 1
+                    },
+                    {
+                        label: 'Bob (HT)',
+                        data: [0],  // we will update index 0
+                        backgroundColor: 'rgba(192, 75, 192, 0.6)',
+                        borderColor: 'rgba(192, 75, 192, 1)',
+                        borderWidth: 1
+                    }
+                ]
+            },
+            options: {
+                scales: {
+                    y: {
+                        beginAtZero: true,
+                        precision: 0
+                    }
+                }
+            }
+        });
+
+        // --- Score Difference Frequency Chart ---
+        const ctxDifference = document.getElementById('differenceChart').getContext('2d');
+        let chartDifference = new Chart(ctxDifference, {
+            type: 'bar',
+            data: {
+                labels: [],
+                datasets: [{
+                    label: 'Frequency',
+                    data: [],
+                    backgroundColor: 'rgba(100, 150, 240, 0.6)',
+                    borderColor: 'rgba(100, 150, 240, 1)',
+                    borderWidth: 1
+                }]
+            },
+            options: {
+                scales: {
+                    x: {
+                        title: { display: true, text: 'Score Difference (Alice - Bob)' }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        title: { display: true, text: 'Frequency' },
+                        ticks: { precision: 0 }
+                    }
+                }
+            }
+        });
+
+        // --- Score Frequency Chart (Alice & Bob) ---
+        const ctxScore = document.getElementById('scoreChart').getContext('2d');
+        let chartScoreFrequency = new Chart(ctxScore, {
+            type: 'bar',
+            data: {
+                labels: [],
+                datasets: [
+                    {
+                        label: "Alice's Score Frequency",
+                        data: [],
+                        backgroundColor: 'rgba(75, 192, 192, 0.6)',
+                        borderColor: 'rgba(75, 192, 192, 1)',
+                        borderWidth: 1
+                    },
+                    {
+                        label: "Bob's Score Frequency",
+                        data: [],
+                        backgroundColor: 'rgba(192, 75, 192, 0.6)',
+                        borderColor: 'rgba(192, 75, 192, 1)',
+                        borderWidth: 1
+                    }
+                ]
+            },
+            options: {
+                scales: {
+                    x: {
+                        title: { display: true, text: "Score" }
+                    },
+                    y: {
+                        beginAtZero: true,
+                        title: { display: true, text: "Frequency" },
+                        ticks: { precision: 0 }
+                    }
+                }
+            }
+        });
+
+        // Helper functions for mean and std. deviation
+        function mean(arr) {
+            if (arr.length === 0) return 0;
+            return arr.reduce((sum, v) => sum + v, 0) / arr.length;
+        }
+        function stdDev(arr) {
+            if (arr.length === 0) return 0;
+            const avg = mean(arr);
+            const squareDiffs = arr.map(v => Math.pow(v - avg, 2));
+            return Math.sqrt(mean(squareDiffs));
+        }
+
+        // --- Simulate 20 coin flips and count HH (Alice) and HT (Bob) ---
+        function simulateGame() {
+            let flips = [];
+            for (let i = 0; i < 20; i++) {
+                flips.push(Math.random() < 0.5 ? 'H' : 'T');
+            }
+            let HHcount = 0;
+            let HTcount = 0;
+            for (let i = 0; i < flips.length - 1; i++) {
+                if (flips[i] === 'H' && flips[i + 1] === 'H') {
+                    HHcount++;
+                }
+                if (flips[i] === 'H' && flips[i + 1] === 'T') {
+                    HTcount++;
+                }
+            }
+            return { sequence: flips.join(''), HH: HHcount, HT: HTcount };
+        }
+
+        // --- Draw coin-flip sequence with red/blue overlays ---
+        function updateSequenceCanvas(gameResult) {
+            const canvas = document.getElementById('sequenceCanvas');
+            const ctx = canvas.getContext('2d');
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            const flips = gameResult.sequence.split('');
+            const n = flips.length;
+            const widthPerFlip = canvas.width / n;
+            const centerY = canvas.height / 2;
+
+            // Draw the coin letters
+            ctx.font = "20px Arial";
+            ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
+            for (let i = 0; i < n; i++) {
+                const x = (i + 0.5) * widthPerFlip;
+                ctx.fillStyle = "black";
+                ctx.fillText(flips[i], x, centerY);
+            }
+
+            // Overlapping bars for HH (red) below, HT (blue) above
+            const barHeight = 15;
+            const barWidth = widthPerFlip * 1.5;
+            for (let i = 0; i < n - 1; i++) {
+                const pairCenter = (i + 1) * widthPerFlip;
+                if (flips[i] === 'H' && flips[i + 1] === 'H') {
+                    ctx.fillStyle = "rgba(255, 0, 0, 0.3)";
+                    const x = pairCenter - barWidth / 2;
+                    const y = centerY + 20;
+                    ctx.fillRect(x, y, barWidth, barHeight);
+                }
+                if (flips[i] === 'H' && flips[i + 1] === 'T') {
+                    ctx.fillStyle = "rgba(0, 0, 255, 0.3)";
+                    const x = pairCenter - barWidth / 2;
+                    const y = centerY - 20 - barHeight;
+                    ctx.fillRect(x, y, barWidth, barHeight);
+                }
+            }
+        }
+
+        // --- Update Historical Stats Display ---
+        function updateStatsDisplay() {
+            const aliceAvg = mean(aliceScores).toFixed(2);
+            const bobAvg = mean(bobScores).toFixed(2);
+            const aliceStd = stdDev(aliceScores).toFixed(2);
+            const bobStd = stdDev(bobScores).toFixed(2);
+
+            const statsHTML = `
+      <h2>Historical Statistics (over ${totalGames} games)</h2>
+      <table>
+        <tr>
+          <th>Statistic</th>
+          <th>Alice (HH)</th>
+          <th>Bob (HT)</th>
+        </tr>
+        <tr>
+          <td>Average Score</td>
+          <td>${aliceAvg}</td>
+          <td>${bobAvg}</td>
+        </tr>
+        <tr>
+          <td>Standard Deviation</td>
+          <td>${aliceStd}</td>
+          <td>${bobStd}</td>
+        </tr>
+        <tr>
+          <td>Wins</td>
+          <td>${aliceWins}</td>
+          <td>${bobWins}</td>
+        </tr>
+        <tr>
+          <td>Ties</td>
+          <td colspan="2">${ties}</td>
+        </tr>
+      </table>
+    `;
+            document.getElementById('statsDisplay').innerHTML = statsHTML;
+        }
+
+        // --- Update Score Difference Frequency Chart ---
+        function updateFrequencyChart() {
+            const differences = aliceScores.map((a, i) => a - bobScores[i]);
+            if (differences.length === 0) {
+                chartDifference.data.labels = [];
+                chartDifference.data.datasets[0].data = [];
+                chartDifference.update();
+                return;
+            }
+            let freqMap = {};
+            differences.forEach(diff => {
+                freqMap[diff] = (freqMap[diff] || 0) + 1;
+            });
+            let sortedDiffs = Object.keys(freqMap).map(Number).sort((a, b) => a - b);
+            let freqData = sortedDiffs.map(diff => freqMap[diff]);
+
+            chartDifference.data.labels = sortedDiffs;
+            chartDifference.data.datasets[0].data = freqData;
+            chartDifference.update();
+        }
+
+        // --- Update Score Frequency Chart (Alice & Bob) ---
+        // Always show 0..19 on the x-axis.
+        function updateScoreFrequencyChart() {
+            let aliceFreq = {};
+            let bobFreq = {};
+            for (let s = 0; s <= 19; s++) {
+                aliceFreq[s] = 0;
+                bobFreq[s] = 0;
+            }
+            aliceScores.forEach(score => {
+                aliceFreq[score]++;
+            });
+            bobScores.forEach(score => {
+                bobFreq[score]++;
+            });
+            let sortedKeys = [];
+            for (let s = 0; s <= 19; s++) {
+                sortedKeys.push(s);
+            }
+            let aliceFreqArr = sortedKeys.map(key => aliceFreq[key]);
+            let bobFreqArr = sortedKeys.map(key => bobFreq[key]);
+
+            chartScoreFrequency.data.labels = sortedKeys;
+            chartScoreFrequency.data.datasets[0].data = aliceFreqArr;
+            chartScoreFrequency.data.datasets[1].data = bobFreqArr;
+            chartScoreFrequency.update();
+        }
+
+        // --- Simulate One Game & Update All Displays ---
+        function simulateOneGame() {
+            const result = simulateGame();
+            updateSequenceCanvas(result);
+
+            // Update the current game chart (two datasets: Alice[0], Bob[0])
+            chartCurrent.data.datasets[0].data[0] = result.HH; // Alice
+            chartCurrent.data.datasets[1].data[0] = result.HT; // Bob
+            chartCurrent.update();
+
+            // Update the text display for current game scores
+            document.getElementById('currentScoreDisplay').innerText =
+                `Current Game Scores: Alice (HH): ${result.HH} | Bob (HT): ${result.HT}`;
+
+            // Update historical stats
+            totalGames++;
+            aliceScores.push(result.HH);
+            bobScores.push(result.HT);
+            if (result.HH > result.HT) {
+                aliceWins++;
+            } else if (result.HT > result.HH) {
+                bobWins++;
+            } else {
+                ties++;
+            }
+
+            updateStatsDisplay();
+            updateFrequencyChart();
+            updateScoreFrequencyChart();
+        }
+
+        // --- Single Game Button ---
+        document.getElementById('simulateButton').addEventListener('click', simulateOneGame);
+
+        // --- Simulate 100 Games (0.1 second delay) ---
+        function simulateBatch() {
+            let iterations = 0;
+            let interval = setInterval(() => {
+                if (iterations >= 100) {
+                    clearInterval(interval);
+                    return;
+                }
+                iterations++;
+                simulateOneGame();
+            }, 100);
+        }
+        document.getElementById('simulateBatchButton').addEventListener('click', simulateBatch);
+
+        // --- Tab Switching Functionality ---
+        document.querySelectorAll('.tab-button').forEach(button => {
+            button.addEventListener('click', () => {
+                document.querySelectorAll('.tab-button').forEach(btn => btn.classList.remove('active'));
+                button.classList.add('active');
+                document.querySelectorAll('.chart-container > div').forEach(div => div.style.display = 'none');
+                const target = button.getAttribute('data-target');
+                document.getElementById(target).style.display = 'block';
+            });
+        });
+    </script>
+</body>
+
+</html>
